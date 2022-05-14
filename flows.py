@@ -96,8 +96,26 @@ class PartialFlow:
             return theta
         else:
             firstEdge = p.edges[0]
-            # print("theta ", theta)
             return self.pathArrivalTime(Path(p.edges[1:],firstEdge.node_to),self.T(firstEdge,theta))
+
+
+    # The travel time over an edge e at time theta as a function of theta
+    def cf(self, e:Edge) -> PWLin:
+        delay = self.queues[e].smul(1/e.nu)
+        return PWLin([delay.segmentBorders[0],delay.segmentBorders[-1]],[zero],[e.tau]) + delay
+
+
+    # The arrival time at the end of edge e if entering at time theta as function of theta
+    def Tf(self, e:Edge) -> PWLin:
+        return PWLin([zero,infinity],[makeNumber(1)],[zero]) + self.cf(e)
+
+    # Determines the arrival time at the end of path p when starting at time theta as function of theta
+    def pathArrivalTimef(self,p:Path)-> PWLin:
+        if len(p) == 0:
+            return PWLin([zero,infinity],[makeNumber(1)],[zero])
+        else:
+            firstEdge = p.edges[0]
+            return self.pathArrivalTimef(Path(p.edges[1:],firstEdge.node_to)).composeWith(self.Tf(firstEdge))
 
     def hasTerminated(self) -> bool:
         # Checks whether the flow has terminated, i.e. whether

@@ -184,17 +184,21 @@ class PWConst:
         return f
 
 
-# A piecewise linear function: f(x) = mx + t
+# A piecewise linear function, i.e. a function f which is of the form
+#   f(x) = m_i*x + t_i for x \in [b_i,b_{i+1})
 class PWLin:
     noOfSegments: int
     autoSimplify: bool
     segmentBorders: List[number]
     segmentTvalues: List[number]
     segmentMvalues: List[number]
+    maxValue: number
+    minValue: number
 
     def __init__(self, borders: List[number], mvalues: List[number],
                  tvalues: List[number], autoSimplify: bool = True):
         # autoSimplify=True means that adjacent segments are automatically unified whenever possible
+        # TODO: This should then be done in the initialisation!
         self.autoSimplify = autoSimplify
 
         self.noOfSegments = len(mvalues)
@@ -205,6 +209,13 @@ class PWLin:
         self.segmentBorders = borders
         self.segmentMvalues = mvalues
         self.segmentTvalues = tvalues
+
+        self.maxValue = -infinity
+        self.minValue = infinity
+        if self.noOfSegments > 0:
+            for x in self.segmentBorders:
+                self.maxValue = max(self.maxValue,self.getValueAt(x))
+                self.minValue = min(self.minValue, self.getValueAt(x))
 
     def addSegmant(self, border: number, m: number, t: number = None):
         # Adds a new segment on the right side
@@ -222,23 +233,109 @@ class PWLin:
             self.segmentTvalues.append(t)
             self.noOfSegments += 1
 
+        self.maxValue = max(self.maxValue,t,self.getValueAt(border))
+        self.minValue = min(self.minValue, t, self.getValueAt(border))
+
     def getValueAt(self, x: number) -> number:
         if x < self.segmentBorders[0] or x > self.segmentBorders[-1]:
             # x is outside the range of the function
-            pass
+            assert(False)
         else:
             for i in range(0, self.noOfSegments):
                 if x <= self.segmentBorders[i + 1]:
                     return self.segmentTvalues[i] + (x - self.segmentBorders[i]) * self.segmentMvalues[i]
 
+    def getSlopeAt(self, x: number) -> number:
+        if x < self.segmentBorders[0] or x > self.segmentBorders[-1]:
+            # x is outside the range of the function
+            assert(False)
+        else:
+            for i in range(0, self.noOfSegments):
+                if x <= self.segmentBorders[i + 1]:
+                    return self.segmentMvalues[i]
+
+
     def getNextStepFrom(self, x: number) -> number:
         if x >= self.segmentBorders[-1]:
             # TODO: Implement default value and/or better error handling
-            pass
+            assert(False)
         else:
             for i in range(0, self.noOfSegments + 1):
                 if x < self.segmentBorders[i]:
                     return self.segmentBorders[i]
+
+    def getPrevStepFrom(self, x: number) -> number:
+        if x < self.segmentBorders[0]:
+            # TODO: Implement default value and/or better error handling
+            assert(False)
+        else:
+            for i in range(0, self.noOfSegments):
+                if x < self.segmentBorders[i+1]:
+                    return self.segmentBorders[i]
+
+    def __add__(self, other : PWLin) -> PWLin:
+        leftMost = max(self.segmentBorders[0], other.segmentBorders[0])
+        rightMost = min(self.segmentBorders[-1], other.segmentBorders[-1])
+
+        sum = PWLin([leftMost], [], [], self.autoSimplify and other.autoSimplify)
+
+        b = leftMost
+        while b < rightMost:
+            t = self.getValueAt(b) + other.getValueAt(b)
+            m = self.getSlopeAt(b) + other.getSlopeAt(b)
+            b = min(self.getNextStepFrom(b), other.getNextStepFrom(b))
+            sum.addSegmant(b,t,m)
+
+        return sum
+
+    def smul(self, mu: number) -> PWLin:
+        return PWLin(self.segmentBorders, [mu*m for m in self.segmentMvalues],
+                     [mu*t for t in self.segmentTvalues], self.autoSimplify)
+
+
+
+    # Composes the function with another piecewise linear function
+    # i.e. if the current function is f then this results f∘g defined on the maximal possible interval
+    def composeWith(self, g:PWLin) -> PWLin:
+        print(self.segmentBorders[0], g.minValue, g.maxValue, self.segmentBorders[-1])
+        assert self.segmentBorders[0] <= g.minValue and g.maxValue <= self.segmentBorders[-1]
+        # TODO: Can we also handle other cases? Maybe if we use default values?
+        h = PWLin([g.segmentBorders[0]], [], [], self.autoSimplify and g.autoSimplify)
+        for i in range(g.noOfSegments):
+            gt = g.segmentTvalues[i]
+            gm = g.segmentMvalues[i]
+            if gm == 0:
+                h.addSegmant(g.segmentBorders[i+1],zero,self.getValueAt(gt))
+            elif gm > 0:
+                b = g.segmentBorders[i]
+                nextB = g.segmentBorders[i+1]
+                while b < nextB:
+                    # Determine t-value for next interval
+                    t = self.getValueAt(g.getValueAt(b))
+                    # Determine slope for next interval
+                    m = self.getSlopeAt(b)*gm
+                    # Determine next break point
+                    if self.getNextStepFrom(t) < g.getValueAt(nextB):
+                        b+= (self.getNextStepFrom(t)-gt)/gm
+                    else:
+                        b = nextB
+                    h.addSegmant(b,m,t)
+            elif gm < 0:
+                b = g.segmentBorders[i]
+                nextB = g.segmentBorders[i+1]
+                while b < nextB:
+                    # Determine t-value for next interval
+                    t = self.getValueAt(g.getValueAt(b))
+                    # Determine slope for next interval
+                    m = self.getSlopeAt(b)*gm
+                    # Determine next break point
+                    if self.getPrevStepFrom(t) > g.getValueAt(nextB):
+                        b+= (self.getPrevStepFrom(t)-gt)/gm
+                    else:
+                        b = nextB
+                    h.addSegmant(b,m,t)
+        return h
+
 
     def drawGraph(self, start: number, end: number):
         x = [start]
@@ -251,15 +348,6 @@ class PWLin:
         plt.plot(x, y)
         return plt
 
-    # def __str__(self):
-        # f = "|" + str(self.segmentBorders[0]) + "|"
-        # for i in range(len(self.segmentMvalues)):
-            # f += str(self.segmentTvalues[i]) + "-" \
-                 # + str(
-                # self.segmentTvalues[i] + (self.segmentBorders[i + 1] - self.segmentBorders[i]) * self.segmentMvalues[i]) \
-                 # + "|" + str(self.segmentBorders[i + 1]) + "|"
-
-        # return f
 
     def segment_as_str(self,i:int,ommitStart:bool=True) -> str:
         # Creates a string of the form |2|3 4|4| for the i-th segment
@@ -287,3 +375,13 @@ class PWLin:
             f += self.segment_as_str(i)
 
         return f
+
+    # def __str__(self):
+        # f = "|" + str(self.segmentBorders[0]) + "|"
+        # for i in range(len(self.segmentMvalues)):
+            # f += str(self.segmentTvalues[i]) + "-" \
+                 # + str(
+                # self.segmentTvalues[i] + (self.segmentBorders[i + 1] - self.segmentBorders[i]) * self.segmentMvalues[i]) \
+                 # + "|" + str(self.segmentBorders[i + 1]) + "|"
+
+        # return f
