@@ -192,8 +192,6 @@ class PWLin:
     segmentBorders: List[number]
     segmentTvalues: List[number]
     segmentMvalues: List[number]
-    maxValue: number
-    minValue: number
 
     def __init__(self, borders: List[number], mvalues: List[number],
                  tvalues: List[number], autoSimplify: bool = True):
@@ -210,12 +208,6 @@ class PWLin:
         self.segmentMvalues = mvalues
         self.segmentTvalues = tvalues
 
-        self.maxValue = -infinity
-        self.minValue = infinity
-        if self.noOfSegments > 0:
-            for x in self.segmentBorders:
-                self.maxValue = max(self.maxValue,self.getValueAt(x))
-                self.minValue = min(self.minValue, self.getValueAt(x))
 
     def addSegmant(self, border: number, m: number, t: number = None):
         # Adds a new segment on the right side
@@ -233,10 +225,9 @@ class PWLin:
             self.segmentTvalues.append(t)
             self.noOfSegments += 1
 
-        self.maxValue = max(self.maxValue,t,self.getValueAt(border))
-        self.minValue = min(self.minValue, t, self.getValueAt(border))
 
     def getValueAt(self, x: number) -> number:
+        # TODO: Should the second one be >=?
         if x < self.segmentBorders[0] or x > self.segmentBorders[-1]:
             # x is outside the range of the function
             assert(False)
@@ -246,12 +237,12 @@ class PWLin:
                     return self.segmentTvalues[i] + (x - self.segmentBorders[i]) * self.segmentMvalues[i]
 
     def getSlopeAt(self, x: number) -> number:
-        if x < self.segmentBorders[0] or x > self.segmentBorders[-1]:
+        if x < self.segmentBorders[0] or x >= self.segmentBorders[-1]:
             # x is outside the range of the function
             assert(False)
         else:
             for i in range(0, self.noOfSegments):
-                if x <= self.segmentBorders[i + 1]:
+                if x < self.segmentBorders[i + 1]:
                     return self.segmentMvalues[i]
 
 
@@ -284,7 +275,7 @@ class PWLin:
             t = self.getValueAt(b) + other.getValueAt(b)
             m = self.getSlopeAt(b) + other.getSlopeAt(b)
             b = min(self.getNextStepFrom(b), other.getNextStepFrom(b))
-            sum.addSegmant(b,t,m)
+            sum.addSegmant(b,m,t)
 
         return sum
 
@@ -295,45 +286,58 @@ class PWLin:
 
 
     # Composes the function with another piecewise linear function
-    # i.e. if the current function is f then this results f∘g defined on the maximal possible interval
+    # i.e. if the current function is f then this results in f∘g defined on the maximal possible interval containing
+    # the start of the domain of g
     def composeWith(self, g:PWLin) -> PWLin:
-        print(self.segmentBorders[0], g.minValue, g.maxValue, self.segmentBorders[-1])
-        assert self.segmentBorders[0] <= g.minValue and g.maxValue <= self.segmentBorders[-1]
+        assert self.segmentBorders[0] <= g.getValueAt(g.segmentBorders[0]) and g.getValueAt(g.segmentBorders[0]) < self.segmentBorders[-1]
         # TODO: Can we also handle other cases? Maybe if we use default values?
         h = PWLin([g.segmentBorders[0]], [], [], self.autoSimplify and g.autoSimplify)
         for i in range(g.noOfSegments):
             gt = g.segmentTvalues[i]
+            if self.segmentBorders[-1] <= gt:
+                return h
             gm = g.segmentMvalues[i]
             if gm == 0:
                 h.addSegmant(g.segmentBorders[i+1],zero,self.getValueAt(gt))
             elif gm > 0:
+                # The right end of the interval we can extend for:
+                bMax = min(g.segmentBorders[i+1],g.segmentBorders[i]+(self.segmentBorders[-1]-gt)/gm)
                 b = g.segmentBorders[i]
-                nextB = g.segmentBorders[i+1]
-                while b < nextB:
+                while b < bMax:
+                    # Determine next break point
+                    bNew = min(bMax, b + (self.getNextStepFrom(gt) - gt) / gm)
                     # Determine t-value for next interval
                     t = self.getValueAt(g.getValueAt(b))
                     # Determine slope for next interval
-                    m = self.getSlopeAt(b)*gm
-                    # Determine next break point
-                    if self.getNextStepFrom(t) < g.getValueAt(nextB):
-                        b+= (self.getNextStepFrom(t)-gt)/gm
-                    else:
-                        b = nextB
-                    h.addSegmant(b,m,t)
+                    # Take the slope in the middle of the interval in order to avoid choosing the wrong slope
+                    # because of rounding issues
+                    # TODO: Also for t?
+                    m = self.getSlopeAt(g.getValueAt((b+bNew)/2))*gm
+
+                    h.addSegmant(bNew,m,t)
+                    b = bNew
+                    gt = g.getValueAt(b)
             elif gm < 0:
+                if gt <= self.segmentBorders[0]:
+                    return h
+                # The right end of the interval we can extend for:
+                bMax = min(g.segmentBorders[i+1],g.segmentBorders[i]+(self.segmentBorders[0]-gt)/gm)
                 b = g.segmentBorders[i]
-                nextB = g.segmentBorders[i+1]
-                while b < nextB:
+                while b < bMax:
+                    # Determine next break point
+                    bNew = min(bMax, b + (self.getPrevStepFrom(gt) - gt) / gm)
                     # Determine t-value for next interval
                     t = self.getValueAt(g.getValueAt(b))
                     # Determine slope for next interval
-                    m = self.getSlopeAt(b)*gm
-                    # Determine next break point
-                    if self.getPrevStepFrom(t) > g.getValueAt(nextB):
-                        b+= (self.getPrevStepFrom(t)-gt)/gm
-                    else:
-                        b = nextB
-                    h.addSegmant(b,m,t)
+                    # Take the slope in the middle of the interval in order to avoid choosing the wrong slope
+                    # because of rounding issues
+                    # TODO: Also for t?
+                    m = self.getSlopeAt(g.getValueAt((b+bNew)/2))*gm
+
+                    h.addSegmant(bNew,m,t)
+                    b = bNew
+                    gt = g.getValueAt(b)
+
         return h
 
 
