@@ -146,14 +146,14 @@ if True:
         [insName1,timeHorizon1,maxIter1,timeLimit1,precision1,alpha1,timeStep1,priceToTime,numThreads,alphaStr1] = re.split('[_]', fname1)
 
         yBsum1 = []
-        for c,p in enumerate(f[()].fPlus):
-            u = sum([f[()].fPlus[c][p1].integrate(0,1) for p1 in f[()].fPlus[c]])
+        for c,p in enumerate(f[()]._fPlus):
+            u = sum([f[()]._fPlus[c][p1].integrate(0, 1) for p1 in f[()]._fPlus[c]])
             yBsum = []
             tt = data1['travelTime']
             xB1 = [float(timeStep)/2 + x*float(timeStep) for x in range(int((len(tt[0][0])-0)))]
-            for i,p1 in enumerate(f1[()].fPlus[c]):
-                x,y = f1[()].fPlus[c][p1].getXandY(0,f[()].getEndOfInflow(c))
-                y1 = [f1[()].fPlus[c][p1].getValueAt(i) for i in xB1]
+            for i,p1 in enumerate(f1[()]._fPlus[c]):
+                x,y = f1[()]._fPlus[c][p1].getXandY(0, f[()].getEndOfInflow(c))
+                y1 = [f1[()]._fPlus[c][p1].getValueAt(i) for i in xB1]
                 # yB = [p1.getNetEnergyConsump()*v/u for v in y]
                 yB1 = [p1.getNetEnergyConsump()*v/u for v in y1]
                 # print('x', x)
@@ -220,7 +220,7 @@ if True:
         tmax = []
         tsum = []
         tavg = []
-        for c,_ in enumerate(f[()].fPlus):
+        for c,_ in enumerate(f[()]._fPlus):
             print('\nComm.',c)
             tt = data1['travelTime']
             # print(tt)
@@ -233,10 +233,10 @@ if True:
             tminc = []
             tmaxc = []
             tcavg = []
-            for p,q in enumerate(g[()].fPlus[c]):
+            for p,q in enumerate(g[()]._fPlus[c]):
             # for p in range(len(tt[c])):
                 y = tt[c][p]
-                flow = [g[()].fPlus[c][q].getValueAt(i) for i in x]
+                flow = [g[()]._fPlus[c][q].getValueAt(i) for i in x]
                 if max(flow) > 0:
                     # tminc = [lambda:y, lambda:[min(tminc[i],y[i]) for i,_ in enumerate(y)]][len(tminc)>0]()
                     print('p%d'%p, [round(float(i),4) for i in y])
@@ -250,8 +250,8 @@ if True:
                 maxval = 0
                 sumval = 0
                 sumcnt = 0
-                for p,q in enumerate(g[()].fPlus[c]):
-                    if g[()].fPlus[c][q].getValueAt(k) > 0:
+                for p,q in enumerate(g[()]._fPlus[c]):
+                    if g[()]._fPlus[c][q].getValueAt(k) > 0:
                         val = min(val, tt[c][p][t])
                         maxval = max(val, tt[c][p][t])
                         sumval += tt[c][p][t]
@@ -310,7 +310,7 @@ if True:
 MIN. TRAVEL TIMES PER COMMODITY
 if False:
     figTC, axsTC = plt.subplots(1)
-    for c,p in enumerate(f[()].fPlus):
+    for c,p in enumerate(f[()]._fPlus):
         print('Comm.',c)
         g = data['f']
         tt = data['travelTime']
@@ -329,8 +329,8 @@ if False:
                 # print('flow', [round(float(i),4) for i in flow])
         for t,k in enumerate(x):
             val = math.inf
-            for p,q in enumerate(g[()].fPlus[c]):
-                if g[()].fPlus[c][q].getValueAt(k) > 0:
+            for p,q in enumerate(g[()]._fPlus[c]):
+                if g[()]._fPlus[c][q].getValueAt(k) > 0:
                     val = min(val, tt[c][p][t])
             tminc.append(val)
         print('\ntminc', tminc)

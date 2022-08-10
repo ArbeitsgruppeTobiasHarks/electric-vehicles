@@ -101,10 +101,10 @@ G.addEdge("d", "t", ExtendedRational(3), ExtendedRational(1))
 
 f = fixedPointIteration(G,1,[(G.getNode("s"),G.getNode("t"),PWConst([0,10],[10],0))],50,100,False)
 print(f)
-networkLoading(f).fPlus[G.edges[0],0].drawGraph(0,10).show()
-networkLoading(f).fPlus[G.edges[2],1].drawGraph(0,10).show()
-networkLoading(f).queues[G.edges[0]].drawGraph(0,10).show()
-networkLoading(f).queues[G.edges[4]].drawGraph(0,10).show()
+networkLoading(f)._fPlus[G.edges[0], 0].drawGraph(0, 10).show()
+networkLoading(f)._fPlus[G.edges[2], 1].drawGraph(0, 10).show()
+networkLoading(f)._queues[G.edges[0]].drawGraph(0, 10).show()
+networkLoading(f)._queues[G.edges[4]].drawGraph(0, 10).show()
 
 
 ## An  adjusted example ##

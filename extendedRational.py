@@ -118,10 +118,14 @@ if exact == 0:
     def makeNumber(n):
         return float(n)
     numPrecision = 0.00001
+    def IsZero(n):
+        return -numPrecision <= n <= numPrecision
 else:
     infinity = ExtendedRational(1,0)
     zero = ExtendedRational(0)
     def makeNumber(n):
         return ExtendedRational(n)
     numPrecision = zero
+    def isZero(n):
+        return n == zero
 

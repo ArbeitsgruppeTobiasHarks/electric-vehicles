@@ -7,11 +7,11 @@ from extendedRational import *
 
 # A right-constant function with finitely many steps
 class PWConst:
-    noOfSegments: int
-    segmentBorders: List[number]
-    segmentValues: List[number]
-    defaultValue: number
-    autoSimplify: bool
+    _noOfSegments: int
+    _segmentBorders: List[number]
+    _segmentValues: List[number]
+    _defaultValue: number
+    _autoSimplify: bool
 
     def __init__(self, borders: List[number], values: List[number],
                  defaultValue: number = None, autoSimplyfy: bool = True):
@@ -19,54 +19,60 @@ class PWConst:
         # to a single segment
         # If a defaultValue is given this is the value of the function outside of the given borders
         # If none is given the function is undefined there
-        self.defaultValue = defaultValue
+        # Note, that the first or last interval can have the same value as the default value and will not be deleted
+        # by autoSimplify
+        self._defaultValue = defaultValue
         assert (len(borders) == len(values) + 1)
-        self.noOfSegments = len(values)
+        self._noOfSegments = len(values)
         # TODO: check that borders are non-decreasing
-        self.segmentBorders = borders
-        self.segmentValues = values
+        self._segmentBorders = borders
+        self._segmentValues = values
 
-        self.autoSimplify = autoSimplyfy
+        self._autoSimplify = autoSimplyfy
 
     def addSegment(self, border: number, value: number):
         # Adds a new constant segment at the right side
-        assert (self.segmentBorders[-1] <= border + numPrecision)
+        assert (self._segmentBorders[-1] <= border + numPrecision)
 
         # Only add new segment if it is larger than the given precision
-        if self.segmentBorders[-1] - numPrecision < border < self.segmentBorders[-1]+numPrecision:
+        if self._segmentBorders[-1] - numPrecision < border < self._segmentBorders[-1]+numPrecision:
             return
 
         # If autoSimplify is active and the new intervals value is the same (up to the given precision) as the one of
         # the last interval, we extend the last interval instead of creating a new one
-        if self.autoSimplify and len(self.segmentValues) > 0 and value - numPrecision <= self.segmentValues[-1] <= value + numPrecision:
-            self.segmentBorders[-1] = border
+        if self._autoSimplify and len(self._segmentValues) > 0 and value - numPrecision <= self._segmentValues[-1] <= value + numPrecision:
+            self._segmentBorders[-1] = border
         else:
-            self.segmentBorders.append(border)
-            self.segmentValues.append(value)
-            self.noOfSegments += 1
+            self._segmentBorders.append(border)
+            self._segmentValues.append(value)
+            self._noOfSegments += 1
+
+    def addSegmentRel(self, length: number, value: number):
+        # Adds a new constant segment of length length at the right side
+        self.addSegment(self._segmentBorders[-1]+length,value)
 
     def getValueAt(self, x: number) -> number:
         # Returns the value of the function at x
-        if x < self.segmentBorders[0] or x >= self.segmentBorders[-1]:
+        if x < self._segmentBorders[0] or x >= self._segmentBorders[-1]:
             # x is outside the range of the function
-            return self.defaultValue
+            return self._defaultValue
         else:
-            for i in range(0, self.noOfSegments):
-                if x < self.segmentBorders[i + 1]:
-                    return self.segmentValues[i]
+            for i in range(0, self._noOfSegments):
+                if x < self._segmentBorders[i + 1]:
+                    return self._segmentValues[i]
 
     def getNextStepFrom(self, x: number) -> number:
         # get the next step of the function strictly after x
-        if x >= self.segmentBorders[-1]:
-            if self.defaultValue is None:
+        if x >= self._segmentBorders[-1]:
+            if self._defaultValue is None:
                 # TODO: Raise an error
                 pass
             else:
                 return infinity
         else:
-            for i in range(0, self.noOfSegments + 1):
-                if x < self.segmentBorders[i]:
-                    return self.segmentBorders[i]
+            for i in range(0, self._noOfSegments + 1):
+                if x < self._segmentBorders[i]:
+                    return self._segmentBorders[i]
 
     def __add__(self, other: PWConst) -> PWConst:
         # Add two piecewise constant functions
@@ -74,24 +80,24 @@ class PWConst:
         # If at least one of the functions is undefined outside its borders the sum of the two function can only be
         # defined within the boundaries of that function (the intersection of the two boundaries if both functions
         # are undefined outside their boundaries)
-        if self.defaultValue is None and other.defaultValue is None:
+        if self._defaultValue is None and other._defaultValue is None:
             default = None
-            leftMost = max(self.segmentBorders[0], other.segmentBorders[0])
-            rightMost = min(self.segmentBorders[-1], other.segmentBorders[-1])
-        elif self.defaultValue is None and not (other.defaultValue is None):
+            leftMost = max(self._segmentBorders[0], other._segmentBorders[0])
+            rightMost = min(self._segmentBorders[-1], other._segmentBorders[-1])
+        elif self._defaultValue is None and not (other._defaultValue is None):
             default = None
-            leftMost = self.segmentBorders[0]
-            rightMost = self.segmentBorders[-1]
-        elif not(self.defaultValue is None) and other.defaultValue is None:
+            leftMost = self._segmentBorders[0]
+            rightMost = self._segmentBorders[-1]
+        elif not(self._defaultValue is None) and other._defaultValue is None:
             default = None
-            leftMost = other.segmentBorders[0]
-            rightMost = other.segmentBorders[-1]
+            leftMost = other._segmentBorders[0]
+            rightMost = other._segmentBorders[-1]
         else:
-            default = self.defaultValue + other.defaultValue
-            leftMost = min(self.segmentBorders[0], other.segmentBorders[0])
-            rightMost = max(self.segmentBorders[-1], other.segmentBorders[-1])
+            default = self._defaultValue + other._defaultValue
+            leftMost = min(self._segmentBorders[0], other._segmentBorders[0])
+            rightMost = max(self._segmentBorders[-1], other._segmentBorders[-1])
 
-        sum = PWConst([leftMost], [], default, self.autoSimplify and other.autoSimplify)
+        sum = PWConst([leftMost], [], default, self._autoSimplify and other._autoSimplify)
 
         x = leftMost
         while x < rightMost:
@@ -104,13 +110,13 @@ class PWConst:
     def smul(self, mu: number) -> PWConst:
         # Creates a new piecewise constant function by scaling the current one by mu
 
-        if self.defaultValue is None:
+        if self._defaultValue is None:
             default = None
         else:
-            default = mu * self.defaultValue
-        scaled = PWConst([self.segmentBorders[0]], [], default, self.autoSimplify)
-        for i in range(len(self.segmentValues)):
-            scaled.addSegment(self.segmentBorders[i + 1], mu * self.segmentValues[i])
+            default = mu * self._defaultValue
+        scaled = PWConst([self._segmentBorders[0]], [], default, self._autoSimplify)
+        for i in range(len(self._segmentValues)):
+            scaled.addSegment(self._segmentBorders[i + 1], mu * self._segmentValues[i])
 
         return scaled
 
@@ -118,10 +124,10 @@ class PWConst:
         # Creates a new piecewise constant function by restricting the current one to the interval [a,b)
         # and setting it to default outside [a,b)
 
-        x = max(a,self.segmentBorders[0])
+        x = max(a, self._segmentBorders[0])
         restrictedF = PWConst([x], [], defaultValue=default)
 
-        while x <= self.segmentBorders[-1] and x < b:
+        while x <= self._segmentBorders[-1] and x < b:
             val = self.getValueAt(x)
             x = min(self.getNextStepFrom(x), b)
             restrictedF.addSegment(x, val)
@@ -132,13 +138,13 @@ class PWConst:
         return restrictedF
 
     def isZero(self) -> bool:
-        # Checks whether the function is zero wherever it is defined
-        if self.defaultValue is not None and -infinity < self.segmentBorders[0] \
-                and self.segmentBorders[-1] < infinity and self.defaultValue != zero:
+        # Checks whether the function is zero (up to the given precision) wherever it is defined
+        if self._defaultValue is not None and -infinity < self._segmentBorders[0] \
+                and self._segmentBorders[-1] < infinity and not(isZero(self._defaultValue)):
             # If the default value is not zero, the function is not zero
             return False
-        for y in self.segmentValues:
-            if y != zero:
+        for y in self._segmentValues:
+            if not(isZero(y)):
                 # If there is one segment where the function is non-zero, the function is not zero
                 # (this assume that there are no zero-length intervals!)
                 return False
@@ -146,19 +152,19 @@ class PWConst:
 
     def __abs__(self) -> PWConst:
         # Creates a new piecewise constant functions |f|
-        if self.defaultValue is None:
+        if self._defaultValue is None:
             default = None
         else:
-            default = self.defaultValue.__abs__()
-        absf = PWConst([self.segmentBorders[0]], [], default, self.autoSimplify)
-        for i in range(len(self.segmentValues)):
-            absf.addSegment(self.segmentBorders[i + 1], self.segmentValues[i].__abs__())
+            default = self._defaultValue.__abs__()
+        absf = PWConst([self._segmentBorders[0]], [], default, self._autoSimplify)
+        for i in range(len(self._segmentValues)):
+            absf.addSegment(self._segmentBorders[i + 1], self._segmentValues[i].__abs__())
 
         return absf
 
     def integrate(self, a: number, b: number) -> number:
         # Determines the value of the integral of the given piecewise function from a to b
-        assert (self.defaultValue is not None or (a >= self.segmentBorders[0] and b <= self.segmentBorders[-1]))
+        assert (self._defaultValue is not None or (a >= self._segmentBorders[0] and b <= self._segmentBorders[-1]))
 
         integral = zero
         x = a
@@ -173,8 +179,8 @@ class PWConst:
         # Computes the L1-norm of the function
         # requires the function to either be undefined or zero outside its borders
         # (otherwise the L1-norm would be undefined/+-infty)
-        assert (self.defaultValue is None or self.defaultValue == 0)
-        return self.__abs__().integrate(self.segmentBorders[0], self.segmentBorders[-1])
+        assert (self._defaultValue is None or self._defaultValue == 0)
+        return self.__abs__().integrate(self._segmentBorders[0], self._segmentBorders[-1])
 
     def drawGraph(self, start: number, end: number):
         # Draws a graph of the function between start and end
@@ -217,14 +223,14 @@ class PWConst:
         return x,y
 
     def __str__(self):
-        f = "|" + str(round(float(self.segmentBorders[0]),2)) + "|"
-        for i in range(len(self.segmentValues)):
+        f = "|" + str(round(float(self._segmentBorders[0]), 2)) + "|"
+        for i in range(len(self._segmentValues)):
             # f += "-" + str(self.segmentValues[i]) + "-|" + str(self.segmentBorders[i + 1]) + "|"
-            f += " " + str(round(float(self.segmentValues[i]),2)) + " |"
-            if self.segmentBorders[i+1] < infinity:
-                f += str(round(float(self.segmentBorders[i + 1]),2)) + "|"
+            f += " " + str(round(float(self._segmentValues[i]), 2)) + " |"
+            if self._segmentBorders[i + 1] < infinity:
+                f += str(round(float(self._segmentBorders[i + 1]), 2)) + "|"
             else:
-                f += str(self.segmentBorders[i + 1]) + "|"
+                f += str(self._segmentBorders[i + 1]) + "|"
         return f
 
 

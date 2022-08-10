@@ -45,7 +45,7 @@ f = data['f']
 G = data['G']
 
 fig, axs = plt.subplots(3)
-for c,p in enumerate(f[()].fPlus):
+for c,p in enumerate(f[()]._fPlus):
     # print('comm:%d'%c, f[()].fPlus[c], f[()].getEndOfInflow(c))
     # exit(0)
     print('Commodity: %d'%c)
@@ -79,19 +79,19 @@ for c,p in enumerate(f[()].fPlus):
     k = -1
     k += 1
     figB, axsB = plt.subplots(1)
-    u = sum([f[()].fPlus[c][p1].integrate(0,1) for p1 in f[()].fPlus[c]])
+    u = sum([f[()]._fPlus[c][p1].integrate(0, 1) for p1 in f[()]._fPlus[c]])
     fmax = 0.2 + u
-    bmax = 1 + max([2*p.getNetEnergyConsump() for p in f[()].fPlus[c]])
-    bmin = min([2*p.getNetEnergyConsump() for p in f[()].fPlus[c]])
+    bmax = 1 + max([2 * p.getNetEnergyConsump() for p in f[()]._fPlus[c]])
+    bmin = min([2 * p.getNetEnergyConsump() for p in f[()]._fPlus[c]])
     print('bmin ',bmin)
     yBsum = []
     # for p in f[()].fPlus[c]:
         # fmax += f[()].fPlus[c][p].integrate(0,1)
-    for i,p1 in enumerate(f[()].fPlus[c]):
+    for i,p1 in enumerate(f[()]._fPlus[c]):
         # k += 1
         #TODO: Determine the right end of x-axis for plots
         # x,y = f[()].fPlus[0][p].getXandY(0,20)
-        x,y = f[()].fPlus[c][p1].getXandY(0,f[()].getEndOfInflow(c))
+        x,y = f[()]._fPlus[c][p1].getXandY(0, f[()].getEndOfInflow(c))
         yB = [p1.getNetEnergyConsump()*2*v/u for v in y]
         if (len(y) > 2):
             xB = x

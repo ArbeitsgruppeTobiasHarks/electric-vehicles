@@ -35,7 +35,7 @@ def findShortestFeasibleSTpath(time: number, s: Node, t: Node, flow:
                 p.add_edge_at_start(e)
                 break
 
-    print("shortest ST path ", printPathInNetwork(p, flow.network))
+    print("shortest ST path ", printPathInNetwork(p, flow._network))
     return p
 
 
@@ -238,7 +238,7 @@ def fixedPointAlgo(N : Network, pathList : List[Path], precision : float, commod
     # Initial flow: For every commodity, select the shortest s-t path and send
     # all flow along this path (and 0 flow along all other paths)
     for i,(s,t,_,_,u) in enumerate(commodities):
-        flowlist = [PWConst([0,u.segmentBorders[-1]],[0],0)]*(len(pathList[i])-1)
+        flowlist = [PWConst([0, u._segmentBorders[-1]], [0], 0)] * (len(pathList[i]) - 1)
         flowlist.insert(0,u)
         pathInflows.setPaths(i, pathList[i], flowlist)
 
@@ -339,16 +339,16 @@ def fixedPointAlgo(N : Network, pathList : List[Path], precision : float, commod
             for i,comd in enumerate(commodities):
                 qopiInt = 0
                 if False: print('comm ', i)
-                fP = newpathInflows.fPlus[i]
+                fP = newpathInflows._fPlus[i]
                 theta = zero
-                oldqopi = np.zeros(len(newpathInflows.fPlus[i]))
+                oldqopi = np.zeros(len(newpathInflows._fPlus[i]))
                 while theta < newpathInflows.getEndOfInflow(i):
-                    tt = np.empty(len(newpathInflows.fPlus[i]))
-                    for j,P in enumerate(newpathInflows.fPlus[i]):
+                    tt = np.empty(len(newpathInflows._fPlus[i]))
+                    for j,P in enumerate(newpathInflows._fPlus[i]):
                         tt[j] = iterFlow.pathArrivalTime(P,theta + timeStep/2) - (theta + timeStep/2)
                     tmin = min(tt)
                     fval = []
-                    for j,P in enumerate(newpathInflows.fPlus[i]):
+                    for j,P in enumerate(newpathInflows._fPlus[i]):
                         val = fP[P].getValueAt(theta + timeStep/2)
                         fval.append(val)
                         newqopi = (tt[j] - tmin)*val
@@ -357,10 +357,10 @@ def fixedPointAlgo(N : Network, pathList : List[Path], precision : float, commod
                         oldqopi[j] = newqopi
                     theta = theta + timeStep
                 # Integrate also over the interval [finalTheta, T]
-                for j,_ in enumerate(newpathInflows.fPlus[i]):
+                for j,_ in enumerate(newpathInflows._fPlus[i]):
                     qopiInt += ((oldqopi[j]-0)/2)*timeStep/tmin
 
-                commFlow = comd[4].integrate(comd[4].segmentBorders[0], comd[4].segmentBorders[-1])
+                commFlow = comd[4].integrate(comd[4]._segmentBorders[0], comd[4]._segmentBorders[-1])
                 qopiFlow += qopiInt/commFlow
 
             if verbose: print("Norm of change in flow (abs.) ", round(float(newAbsDiffBwFlows),4),\
@@ -388,14 +388,14 @@ def fixedPointAlgo(N : Network, pathList : List[Path], precision : float, commod
     # Find path travel times for the final flow
     finalFlow = networkLoading(pathInflows, verbose=False)
     for i,comd in enumerate(commodities):
-        fP = newpathInflows.fPlus[i]
+        fP = newpathInflows._fPlus[i]
         ttravelTime = np.empty([len(pathInflows.fPlus[i]),\
                 math.ceil(pathInflows.getEndOfInflow(i)/timeStep)])
         qopiPath = np.empty([len(pathInflows.fPlus[i]),\
                 math.ceil(pathInflows.getEndOfInflow(i)/timeStep)])
         theta = zero
         k = -1
-        commFlow = comd[4].integrate(comd[4].segmentBorders[0], comd[4].segmentBorders[-1])
+        commFlow = comd[4].integrate(comd[4]._segmentBorders[0], comd[4]._segmentBorders[-1])
         while theta < pathInflows.getEndOfInflow(i):
             k += 1
             for j,P in enumerate(pathInflows.fPlus[i]):

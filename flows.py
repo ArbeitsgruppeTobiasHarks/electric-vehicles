@@ -3,71 +3,180 @@ from __future__ import annotations
 from typing import Dict, List
 from network import *
 from utilities import *
+from networkLoadingEvents import *
 
 import json
+
+# A flow on a single edge consisting of in- and outflow rate for every commodity up to a certain time
+# Also provides the aggregated flow rates, queue length, travel time
+class EdgeFlow:
+    # The edge this flow is defined on
+    _e: Edge
+    # The edge inflow rates (commodity specific)
+    _fPlus: Dict[int, PWConst]
+    # The aggregated inflow rate
+    _fPlusA : PWConst
+    # The edge outflow rates (commodity specific)
+    _fMinus: Dict[(Edge, int), PWConst]
+    # The aggregated outflow rate
+    _fMinusA: PWConst
+    # The queue
+    _queue: PWLin
+    # The number of commodities
+    _noOfCommodities: int
+    # up to what time is the inflow determined
+    _upTo: number
+
+    def __init__(self, e: Edge, numberOfCommodities: int):
+        self._e = e
+        self._noOfCommodities = numberOfCommodities
+
+        # initialize with the zero flow up to time zero
+        # TODO: Maybe start at -infinity?
+        self._queue = PWLin([zero, zero], [zero], [zero])
+        self._fPlusA = PWConst([zero, zero], [zero])
+        self._fMinusA = PWConst([zero, zero], [zero])
+        for i in range(numberOfCommodities):
+            self._fPlus[i] = PWConst([zero, zero], [zero])
+            self._fMinus[i] = PWConst([zero, e.tau], [zero])
+        self._upTo = zero
+
+    # Extend the edge-flow for an interval of length alpha with the given inflowRates
+    # inflowRates must contain one non-negative inflow rate for every commodity
+    # and return events for the target node whenever the newly determined outflow rate changes
+    # (one event for the end of the extension phase and possibly another one for when the queue runs empty)
+    def extendInflow(self, alpha: number, inflowRates: List[int]) -> List[Event]:
+        assert(len(inflowRates) == self._noOfCommodities)
+        if alpha < numPrecision:
+            return
+
+        fPlusA = zero
+        for i in range(self._noOfCommodities):
+            self._fPlus[i].addSegmentRel(alpha, inflowRates[i])
+            fPlusA += inflowRates[i]
+
+        self._fPlusA.addSegmentRel(alpha, fPlusA)
+
+        # In order to determine the outflow rates from the inflow rates we have to distinguish to cases:
+        # a) The queue is non-empty at the time of the inflow
+        # b) The queue is empty at the time of the inflow
+        # If both cases happen during the extension period, they happen in this order
+        # (ignoring the start point of the extension period)
+
+        # Thus, we first compute the point at which the queue runs empty (or the extension phase ends)...
+        qeAtStart = self._queue.getValueAt(self._upTo)
+        if fPlusA >= self._e.nu - numPrecision:
+            x = alpha
+        elif not(isZero(qeAtStart)):
+            x = qeAtStart / (self._e.nu - fPlusA)
+        else:
+            x = zero
+
+        # .. and then calculate the outflow rates for the interval before and after this point separately
+        # a) while the queue is non-empty flow leaves at an (aggregated) rate of exactly nu_e
+        #    Thus, we can convert the inflow rates to outflow rates by dividing by the following ratio
+        # TODO: If the inflowRate is zero we divide by zero here - but we also only extend for an interval of length zero
+        #       => So, maybe this is fine?
+        kappa = fPlusA / self._e.nu
+        for i in range(self._noOfCommodities):
+            self._fMinus[i].addSegmentRel(x * kappa, inflowRates[i] / kappa)
+
+        self._fMinusA.addSegmentRel(x * kappa, fPlusA / kappa)
+
+        # b) while the queue is empty flow leaves at the same rate as it entered
+        # TODO: We repeat the same code twice here - can we make this cleaner?
+        for i in range(self._noOfCommodities):
+            self._fMinus[i].addSegmentRel(max(zero,alpha-x), inflowRates[i])
+
+        self._fMinusA.addSegmentRel(max(zero,alpha-x), fPlusA)
+
+        self._queue.addSegmant(self._upTo+x,fPlusA - self._e.nu)
+        self._queue.addSegmant(self._upTo+alpha,zero,zero)
+
+        events = []
+        if zero < x < alpha:
+            events.append(Event(self._upTo+x,self._e.node_to,"queue on edge " + str(self._e) + " depleted"))
+        self._upTo += alpha
+        events.append(Event(self._upTo,self._e.node_to,"change in outflow rate due to change in inflow rate"))
+
+        return events
+
+    # The travel time over the edge at time theta
+    def c(self, theta:number) -> number:
+        # the flow has to be determined at least up to time theta
+            assert (self._upTo >= theta)
+            return self._queue.getValueAt(theta) / self._e.nu + self._e.tau
+
+    # The arrival time at the end of edge e if entering at time theta
+    def T(self, theta:number) -> number:
+        return theta + self.c(theta)
+
+    # TODO: We need functions to represent the edge flow as string and convert it to json
+    # TODO: Since the flow rates are now private we probably also need functions to return those - or at least their
+    #       values?
+    # TODO: Should we include the feasibility tests? Or are they unnecessary now that the class itself ensures
+    #       that they are guaranteed?
+
+
 
 # A partial feasible flow with in-/outflow rates for every edges and commodity and queues for every edge
 # Feasibility is not checked automatically but a check can be initiated by calling .checkFeasibility
 class PartialFlow:
     # The network the flow lives in:
-    network: Network
+    _network: Network
     # Stores for every node until which time the flow has been calculated:
-    upToAt: Dict[Node, number]
-    # TODO: Currently the user has to make sure the values of upToAt are kept up to date
-    #   It would be better if this is done within this class!
-    #   This would require to only allow changes of the flow via class-methods
-    #   Is it possible to enforce this in python (i.e. are there private methods?)
+    _upToAt: Dict[Node, number]
     # The edge inflow rates (commodity specific)
-    fPlus: Dict[(Edge,int), PWConst]
+    _fPlus: Dict[(Edge, int), PWConst]
     # The edge outflow rates (commodity specific)
-    fMinus: Dict[(Edge,int), PWConst]
+    _fMinus: Dict[(Edge, int), PWConst]
     # The queues
-    queues: Dict[Edge, PWLin]
+    _queues: Dict[Edge, PWLin]
     # The sources (one for each commodity)
-    sources: List[Node]
+    _sources: List[Node]
     # The sinks (one for each commodity)
-    sinks: List[Node]
+    _sinks: List[Node]
     # The network inflow rates (one for each commodity)
-    u: List[PWConst]
+    _u: List[PWConst]
     # The number of commodities
-    noOfCommodities: int
+    _noOfCommodities: int
 
     def __init__(self, network: Network, numberOfCommodities: int):
-        self.network = network
-        self.noOfCommodities = numberOfCommodities
+        self._network = network
+        self._noOfCommodities = numberOfCommodities
 
         # The zero-flow up to time zero
-        self.upToAt = {}
+        self._upToAt = {}
         for v in network.nodes:
-            self.upToAt[v] = zero
+            self._upToAt[v] = zero
 
         # Initialize functions f^+,f^- and q for every edge e
-        self.fPlus = {}
-        self.fMinus = {}
-        self.queues = {}
+        self._fPlus = {}
+        self._fMinus = {}
+        self._queues = {}
         for e in network.edges:
-            self.queues[e] = PWLin([zero, zero], [zero], [zero])
+            self._queues[e] = PWLin([zero, zero], [zero], [zero])
             for i in range(numberOfCommodities):
-                self.fPlus[(e,i)] = PWConst([zero,zero],[zero])
-                self.fMinus[(e,i)] = PWConst([zero,e.tau],[zero])
+                self._fPlus[(e, i)] = PWConst([zero, zero], [zero])
+                self._fMinus[(e, i)] = PWConst([zero, e.tau], [zero])
 
         # Currently every commodity has a network inflow rate of zero
-        self.u = [PWConst([zero],[],0) for _ in range(self.noOfCommodities)]
+        self._u = [PWConst([zero], [], 0) for _ in range(self._noOfCommodities)]
         # Furthermore we do not know source and sink nodes yet
-        self.sources = [None for _ in range(self.noOfCommodities)]
-        self.sinks = [None for _ in range(self.noOfCommodities)]
+        self._sources = [None for _ in range(self._noOfCommodities)]
+        self._sinks = [None for _ in range(self._noOfCommodities)]
 
     def setSource(self,commodity:int,s:Node):
-        assert(commodity < self.noOfCommodities)
-        self.sources[commodity] = s
+        assert(commodity < self._noOfCommodities)
+        self._sources[commodity] = s
 
     def setSink(self,commodity:int,t:Node):
-        assert(commodity < self.noOfCommodities)
-        self.sinks[commodity] = t
+        assert(commodity < self._noOfCommodities)
+        self._sinks[commodity] = t
 
     def setU(self,commodity:int,u:PWConst):
-        assert (commodity < self.noOfCommodities)
-        self.u[commodity] = u
+        assert (commodity < self._noOfCommodities)
+        self._u[commodity] = u
 
 
     # The travel time over an edge e at time theta
@@ -76,13 +185,13 @@ class PartialFlow:
         # If the flow has terminated then we can assume that all queues are empty after the
         # interval they are defined on
         if self.hasTerminated():
-            if self.queues[e].segmentBorders[-1] >= theta:
-                return self.queues[e].getValueAt(theta)/e.nu + e.tau
+            if self._queues[e].segmentBorders[-1] >= theta:
+                return self._queues[e].getValueAt(theta) / e.nu + e.tau
             else:
                 return zero
         else:
-            assert (self.queues[e].segmentBorders[-1] >= theta)
-            return self.queues[e].getValueAt(theta)/e.nu + e.tau
+            assert (self._queues[e].segmentBorders[-1] >= theta)
+            return self._queues[e].getValueAt(theta) / e.nu + e.tau
 
     # The arrival time at the end of edge e if entering at time theta
     def T(self, e:Edge, theta:number) -> number:
@@ -104,25 +213,25 @@ class PartialFlow:
         #   but instead update some state variables whenever the flow changes
         #   However, this would require that the flow is only changed via class-methods
 
-        for v in self.network.nodes:
+        for v in self._network.nodes:
             # Determine the last time with node inflow
             lastInflowTime = zero
-            for i in range(self.noOfCommodities):
-                if self.sources[i] == v:
-                    lastInflowTime = max(lastInflowTime,self.u[i].segmentBorders[-1])
+            for i in range(self._noOfCommodities):
+                if self._sources[i] == v:
+                    lastInflowTime = max(lastInflowTime, self._u[i]._segmentBorders[-1])
                 for e in v.incoming_edges:
-                    fPei = self.fMinus[(e,i)]
+                    fPei = self._fMinus[(e, i)]
                     # The following case distinction is necessary as the last inflow interval
                     # might be an interval with zero inflow (but not more than one as two adjacent
                     # intervals with zero flow would get unified to one by PWConst)
                     # If we change PWConst so that ending intervals of zero-value get deleted
                     # (since the default value is zero anyway), this would become unnecessary
-                    if len(fPei.segmentValues) > 0 and fPei.segmentValues[-1] == 0:
-                        lastInflowTime = max(lastInflowTime,fPei.segmentBorders[-2])
+                    if len(fPei._segmentValues) > 0 and fPei._segmentValues[-1] == 0:
+                        lastInflowTime = max(lastInflowTime, fPei._segmentBorders[-2])
                     else:
-                        lastInflowTime = max(lastInflowTime, fPei.segmentBorders[-1])
+                        lastInflowTime = max(lastInflowTime, fPei._segmentBorders[-1])
 
-            if self.upToAt[v] < lastInflowTime:
+            if self._upToAt[v] < lastInflowTime:
                 # There is still future inflow at node v which has not been redistributed
                 return False
 
@@ -143,20 +252,20 @@ class PartialFlow:
             flow = zero
             # Add up node inflow rate (over all incoming edges)
             for e in v.incoming_edges:
-                flow += self.fMinus[e,commodity].getValueAt(theta)
-                nextTheta = min(nextTheta,self.fMinus[e,commodity].getNextStepFrom(theta))
+                flow += self._fMinus[e, commodity].getValueAt(theta)
+                nextTheta = min(nextTheta, self._fMinus[e, commodity].getNextStepFrom(theta))
             # If node v is commodity i's source we also add the network inflow rate
-            if v == self.sources[commodity]:
-                flow += self.u[commodity].getValueAt(theta)
-                nextTheta = min(nextTheta, self.u[commodity].getNextStepFrom(theta))
+            if v == self._sources[commodity]:
+                flow += self._u[commodity].getValueAt(theta)
+                nextTheta = min(nextTheta, self._u[commodity].getNextStepFrom(theta))
             # Subtract all node outflow (over all outgoing edges)
             for e in v.outgoing_edges:
-                flow -= self.fPlus[e, commodity].getValueAt(theta)
-                nextTheta = min(nextTheta, self.fPlus[e, commodity].getNextStepFrom(theta))
+                flow -= self._fPlus[e, commodity].getValueAt(theta)
+                nextTheta = min(nextTheta, self._fPlus[e, commodity].getNextStepFrom(theta))
 
             # Now check flow conservation at node v
             # First, a special case for the sink node
-            if v == self.sinks[commodity]:
+            if v == self._sinks[commodity]:
                 if flow < 0:
                     print("Flow conservation does not hold at node ", v, " (sink!) at time ", theta)
                     return False
@@ -180,16 +289,16 @@ class PartialFlow:
             nextTheta = infinity
             outflow = zero
             inflow = zero
-            for i in range(self.noOfCommodities):
-                outflow += self.fMinus[(e,i)].getValueAt(theta+e.tau)
-                inflow += self.fPlus[(e,i)].getValueAt(theta)
-                nextTheta = min(nextTheta,self.fMinus[(e,i)].getNextStepFrom(theta+e.tau),self.fPlus[(e,i)].getNextStepFrom(theta))
-            if self.queues[e].getValueAt(theta) > 0:
+            for i in range(self._noOfCommodities):
+                outflow += self._fMinus[(e, i)].getValueAt(theta + e.tau)
+                inflow += self._fPlus[(e, i)].getValueAt(theta)
+                nextTheta = min(nextTheta, self._fMinus[(e, i)].getNextStepFrom(theta + e.tau), self._fPlus[(e, i)].getNextStepFrom(theta))
+            if self._queues[e].getValueAt(theta) > 0:
                 if outflow != e.nu:
                     print("Queue on edge ",e, " does not operate at capacity at time ", theta)
                     return False
             else:
-                assert(self.queues[e].getValueAt(theta) == 0)
+                assert(self._queues[e].getValueAt(theta) == 0)
                 if outflow != min(inflow,e.nu):
                     print("Queue on edge ", e, " does not operate at capacity at time ", theta)
                     return False
@@ -202,21 +311,21 @@ class PartialFlow:
         # Assumes that f^-_e = 0 on [0,tau_e)
         theta = zero
         currentQueue = zero
-        if self.queues[e].getValueAt(theta) != 0:
+        if self._queues[e].getValueAt(theta) != 0:
             print("Queue on edge ", e, " does not start at 0")
             return False
         while theta < upTo:
-            nextTheta = self.queues[e].getNextStepFrom(theta)
+            nextTheta = self._queues[e].getNextStepFrom(theta)
             inflow = zero
             outflow = zero
-            for i in range(self.noOfCommodities):
-                outflow += self.fMinus[(e, i)].getValueAt(theta + e.tau)
-                inflow += self.fPlus[(e, i)].getValueAt(theta)
-                nextTheta = min(nextTheta,self.fPlus[(e,i)].getNextStepFrom(theta),self.fMinus[(e,i)].getNextStepFrom(theta+e.tau))
+            for i in range(self._noOfCommodities):
+                outflow += self._fMinus[(e, i)].getValueAt(theta + e.tau)
+                inflow += self._fPlus[(e, i)].getValueAt(theta)
+                nextTheta = min(nextTheta, self._fPlus[(e, i)].getNextStepFrom(theta), self._fMinus[(e, i)].getNextStepFrom(theta + e.tau))
             currentQueue += (inflow-outflow)*(nextTheta-theta)
-            if nextTheta < infinity and currentQueue != self.queues[e].getValueAt(nextTheta):
+            if nextTheta < infinity and currentQueue != self._queues[e].getValueAt(nextTheta):
                 print("Queue on edge ", e, " wrong at time ", nextTheta)
-                print("Should be ", currentQueue, " but is ", self.queues[e].getValueAt(nextTheta))
+                print("Should be ", currentQueue, " but is ", self._queues[e].getValueAt(nextTheta))
                 return False
             theta = nextTheta
         return True
@@ -229,10 +338,10 @@ class PartialFlow:
         # (i.e. up to time e.T(theta) if theta is the time up to which the inflow is given)
         # We implicitely assume that this is the case, but currently the user is responsible for ensuring this (TODO)
         feasible = True
-        for i in range(self.noOfCommodities):
-            for v in self.network.nodes:
+        for i in range(self._noOfCommodities):
+            for v in self._network.nodes:
                 feasible = feasible and self.checkFlowConservation(v,upTo,i)
-        for e in self.network.edges:
+        for e in self._network.edges:
             feasible = feasible and self.checkQueueAtCap(e,upTo)
             feasible = feasible and self.checkQueue(e,upTo)
         return feasible
@@ -240,14 +349,14 @@ class PartialFlow:
     # Returns a string representing the queue length functions as well as the edge in and outflow rates
     def __str__(self):
         s = "Queues:\n"
-        for e in self.network.edges:
-            s += " q_" + str(self.network.edges.index(e)) + str(e) + ": " + str(self.queues[e]) + "\n"
+        for e in self._network.edges:
+            s += " q_" + str(self._network.edges.index(e)) + str(e) + ": " + str(self._queues[e]) + "\n"
         s += "----------------------------------------------------------\n"
-        for i in range(self.noOfCommodities):
+        for i in range(self._noOfCommodities):
             s += "Commodity " + str(i) + ":\n"
-            for e in self.network.edges:
-                s += "f_" + str(e) + ": " + str(self.fPlus[(e,i)]) + "\n"
-                s += "f_" + str(e) + ": " + str(self.fMinus[(e,i)]) + "\n"
+            for e in self._network.edges:
+                s += "f_" + str(e) + ": " + str(self._fPlus[(e, i)]) + "\n"
+                s += "f_" + str(e) + ": " + str(self._fMinus[(e, i)]) + "\n"
             s += "----------------------------------------------------------\n"
         return s
 
@@ -259,40 +368,40 @@ class PartialFlow:
         with open(filename, "w") as file:
             json.dump({
                 "network": {
-                    "nodes": [{"id": v.name, "x": 0, "y": 0} for v in self.network.nodes],
+                    "nodes": [{"id": v.name, "x": 0, "y": 0} for v in self._network.nodes],
                     "edges": [{"id": id,
                                "from": e.node_from.name,
                                "to": e.node_to.name,
                                "capacity": e.nu,
                                "transitTime": e.tau}
-                              for (id,e) in enumerate(self.network.edges)],
-                    "commodities": [{ "id": id, "color": "dodgerblue"} for id in range(self.noOfCommodities)]
+                              for (id,e) in enumerate(self._network.edges)],
+                    "commodities": [{ "id": id, "color": "dodgerblue"} for id in range(self._noOfCommodities)]
                 },
                 "flow": {
                     "inflow": [
                         [
-                            {"times": [theta for theta in self.fPlus[(e,i)].segmentBorders[:-1]],
-                             "values": [val for val in self.fPlus[(e,i)].segmentValues],
+                            {"times": [theta for theta in self._fPlus[(e, i)]._segmentBorders[:-1]],
+                             "values": [val for val in self._fPlus[(e, i)]._segmentValues],
                              "domain": [0.0, "Infinity"]}
-                            for i in range(self.noOfCommodities)
+                            for i in range(self._noOfCommodities)
                         ]
-                        for e in self.network.edges
+                        for e in self._network.edges
                     ],
                     "outflow": [
                         [
-                            {"times": [theta for theta in self.fMinus[(e,i)].segmentBorders[:-1]],
-                             "values": [val for val in self.fMinus[(e,i)].segmentValues],
+                            {"times": [theta for theta in self._fMinus[(e, i)]._segmentBorders[:-1]],
+                             "values": [val for val in self._fMinus[(e, i)]._segmentValues],
                              "domain": [0.0, "Infinity"]}
-                            for i in range(self.noOfCommodities)
+                            for i in range(self._noOfCommodities)
                         ]
-                        for e in self.network.edges
+                        for e in self._network.edges
                     ],
                     "queues": [
-                        {"times": [theta for theta in self.queues[e].segmentBorders[:-1]],
-                         "values": [self.queues[e].getValueAt(theta) for theta in self.queues[e].segmentBorders[:-1]],
+                        {"times": [theta for theta in self._queues[e].segmentBorders[:-1]],
+                         "values": [self._queues[e].getValueAt(theta) for theta in self._queues[e].segmentBorders[:-1]],
                          "domain": ["-Infinity", "Infinity"], "lastSlope": 0.0, "firstSlope": 0.0
                         }
-                        for e in self.network.edges
+                        for e in self._network.edges
                     ]
                 }
             },file)
@@ -352,7 +461,7 @@ class PartialFlowPathBased:
         endOfInflow = zero
         for P in self.fPlus[commodity]:
             fP = self.fPlus[commodity][P]
-            endOfInflow = max(endOfInflow, fP.segmentBorders[-1])
+            endOfInflow = max(endOfInflow, fP._segmentBorders[-1])
         return endOfInflow
 
     def __str__(self) -> str:
@@ -363,9 +472,9 @@ class PartialFlowPathBased:
             s += "  of commodity " + str(i) + "\n"
             # print("fplus ", self.fPlus)
             for j,P in enumerate(self.fPlus[i]):
-                if self.fPlus[i][P].noOfSegments > 1 or\
-                        (self.fPlus[i][P].noOfSegments == 1 and
-                                self.fPlus[i][P].segmentValues[0] > 0):
+                if self.fPlus[i][P]._noOfSegments > 1 or\
+                        (self.fPlus[i][P]._noOfSegments == 1 and
+                         self.fPlus[i][P]._segmentValues[0] > 0):
                     # show edge ids with paths here
                     s += "    into path P" + str(j) + " " + self.network.printPathInNetwork(P) +\
                             ": energy cons.: " + str(P.getNetEnergyConsump()) +\
