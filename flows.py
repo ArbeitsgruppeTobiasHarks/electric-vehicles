@@ -27,7 +27,7 @@ class EdgeFlow:
     # up to what time is the inflow determined
     _upTo: number
 
-    def __init__(self, e: Edge, numberOfCommodities: int):
+    def __init__(self, e: Edge, numberOfCommodities: int, fPlus: List[PWConst] = None):
         self._e = e
         self._noOfCommodities = numberOfCommodities
 
@@ -41,14 +41,31 @@ class EdgeFlow:
             self._fMinus[i] = PWConst([zero, e.tau], [zero])
         self._upTo = zero
 
+        # TODO: Maybe also allow to provide fMinus and then accept this without check?
+        # TODO: Currently we assume that fPlus is given up to infinity (at least via a default value)
+        if not(fPlus is None):
+            assert(len(fPlus) == numberOfCommodities)
+            theta = zero
+            while theta < infinity:
+                nextTheta = infinity
+                rates = []
+                for i in range(numberOfCommodities):
+                    rates.append(fPlus[i].getValueAt(theta))
+                    nextTheta = min(nextTheta, fPlus[i].getNextStepFrom(theta))
+                self.extendInflow(nextTheta-theta, rates)
+                theta = nextTheta
+
+
+
+
     # Extend the edge-flow for an interval of length alpha with the given inflowRates
     # inflowRates must contain one non-negative inflow rate for every commodity
     # and return events for the target node whenever the newly determined outflow rate changes
     # (one event for the end of the extension phase and possibly another one for when the queue runs empty)
-    def extendInflow(self, alpha: number, inflowRates: List[int]) -> List[Event]:
+    def extendInflow(self, alpha: number, inflowRates: List[number]) -> List[Event]:
         assert(len(inflowRates) == self._noOfCommodities)
         if alpha < numPrecision:
-            return
+            return []
 
         fPlusA = zero
         for i in range(self._noOfCommodities):
@@ -101,6 +118,35 @@ class EdgeFlow:
 
         return events
 
+    def getNextOutflowStepFrom(self, theta: number) -> number:
+        assert(zero <= theta < self.T(self._upTo))
+
+        nextTheta = infinity
+        for i in range(self._noOfCommodities):
+            nextTheta = min(nextTheta, self._fMinus[i].getNextStepFrom(theta))
+        return nextTheta
+
+    def getOutflowAt(self, theta: number, i : Union[int,None] = None):
+        assert (zero <= theta < self.T(self._upTo))
+
+        if i is None:
+            return self._fMinusA.getValueAt(theta)
+        else:
+            return self._fMinus[i].getValueAt(theta)
+
+    def getFplus(self, i : int = None) -> PWConst:
+        if i is None:
+            return self._fPlusA
+        else:
+            return self._fPlus[i]
+
+    def getFminus(self, i : int = None) -> PWConst:
+        if i is None:
+            return self._fMinusA
+        else:
+            return self._fMinus[i]
+
+
     # The travel time over the edge at time theta
     def c(self, theta:number) -> number:
         # the flow has to be determined at least up to time theta
@@ -117,6 +163,189 @@ class EdgeFlow:
     # TODO: Should we include the feasibility tests? Or are they unnecessary now that the class itself ensures
     #       that they are guaranteed?
 
+
+
+# A commodity is defined by a start node, a sink node and a network inflow-rate
+class Commodity:
+    # The source node
+    _source: Node
+    # The sink node
+    _sink: Node
+    # The network inflow rate (at the source)
+    _u: PWConst
+
+    def __init__(self, s: Node, t: Node, u: PWConst):
+        self._source = s
+        self._sink = t
+        self._u = u
+
+    def getS(self) -> Node:
+        return self._source
+
+    def getT(self) -> Node:
+        return self._sink
+
+    def getU(self) -> PWConst:
+        return self._u
+
+# A commodity with only a single path
+class CommoditySP(Commodity):
+    # The commodity's path
+    _path : Path
+
+    def __init__(self, path: Path, u: PWConst):
+        self._path = path
+        super().__init__(path.getStart(), path.getEnd(), u)
+
+    def getPath(self) -> Path:
+        return self._path
+
+
+
+# A partial feasible flow with in-/outflow rates for every edges and commodity and queues for every edge
+# Feasibility is not checked automatically but a check can be initiated by calling .checkFeasibility
+class Flow:
+    # The network the flow lives in:
+    _network: Network
+    # Stores for every node until which time the flow has been calculated:
+    _upToAt: Dict[Node, number]
+    # The edge flows for all edges
+    _f: Dict[Edge, EdgeFlow]
+    # The sources (one for each commodity)
+    _sources: List[Node]
+    # The sinks (one for each commodity)
+    _sinks: List[Node]
+    # The network inflow rates (one for each commodity)
+    _u: List[PWConst]
+    # The number of commodities
+    _noOfCommodities: int
+
+    def __init__(self, network: Network, commodities: List[Commodity], f: Dict[Edge, EdgeFlow] = {}):
+        self._network = network
+        self._noOfCommodities = len(commodities)
+
+        # Initialize functions f^+,f^- and q for every edge e
+        # If no edge flows are given for any edge we initialize with the zero-flow
+        self._f = {}
+        for e in network.edges:
+            if e in f:
+                self._f[e] = f[e]
+            else:
+                self._f[e] = EdgeFlow(e,self._noOfCommodities)
+
+        # The zero-flow up to time zero TODO: Update this
+        self._upToAt = {}
+        for v in network.nodes:
+            self._upToAt[v] = zero
+
+        self._u = []
+        self._sources = []
+        self._sinks = []
+        # Maybe just save the commodity objects instead?
+        for commodity in commodities:
+            self._u.append(commodity.getU())
+            self._sources.append(commodity.getS())
+            self._sinks.append(commodity.getT())
+
+    # Determines the arrival time at the end of path p when starting at time theta
+    def pathArrivalTime(self, p: Path, theta: number) -> number:
+        if len(p) == 0:
+            return theta
+        else:
+            firstEdge = p.edges[0]
+            return self.pathArrivalTime(Path(p.edges[1:], firstEdge.node_to), self._f[firstEdge].T(theta))
+
+
+# A partial flow in which every commodity only has a single path
+class FlowSP:
+    # The network the flow lives in:
+    _network: Network
+    # Stores for every node until which time the flow has been calculated:
+    _upToAt: Dict[Node, number]
+    # The edge flows for all edges
+    _f: Dict[Edge, EdgeFlow]
+    # The sources (one for each commodity)
+    _sources: List[Node]
+    # The sinks (one for each commodity)
+    _sinks: List[Node]
+    # The network inflow rates (one for each commodity)
+    _u: List[PWConst]
+    # The number of commodities
+    _noOfCommodities: int
+    # The path for every commodity
+    _paths : List[Path]
+    # A dictionary containing for every edge e a list of tuples (i, k) such that e is the k-th edge on the path
+    # of commodity i (where the first edge has number 0)
+    _edgeContainedIn : Dict[Edge, List[Tuple[int, int]]]
+
+    def __init__(self, network: Network, commodities: List[CommoditySP]):
+
+        self._noOfCommodities = len(commodities)
+        self._network = network
+        # The zero-flow up to time zero
+        self._upToAt = {}
+        for v in network.nodes:
+            self._upToAt[v] = zero
+        self._paths = []
+        self._edgeContainedIn = {e : [] for e in network.edges}
+
+        i = 0
+        for commodity in commodities:
+            path = commodity.getPath()
+            self._paths.append(path)
+            self._u.append(commodity.getU())
+            self._sources.append(commodity.getS())
+            self._sinks.append(commodity.getT())
+            k = 0
+            for e in path.edges:
+                self._edgeContainedIn[e].append((i, k))
+                k += 1
+            i += 1
+
+        self._f = {}
+        for e in network.edges:
+            self._f[e] = EdgeFlow(e, len(self._edgeContainedIn[e]))
+
+    # Extends the flow at node v
+    def extendAt(self, v: Node) -> List[Event]:
+        theta = self._upToAt[v]
+        nextTheta = infinity
+        for e in v.incoming_edges:
+            nextTheta = min(nextTheta,self._f[e].getNextOutflowStepFrom(theta))
+        for i in range(self._noOfCommodities):
+            if self._sources[i] == v:
+                nextTheta = min(nextTheta,self._u[i].getNextStepFrom(theta))
+
+        newEvents = []
+        for e in v.outgoing_edges:
+            rates = []
+            j = 0
+            for (i,k) in self._edgeContainedIn[e]:
+                if k == 0:
+                    rates.append(self._u[i].getValueAt(theta))
+                else:
+                    rates.append(self._f[self._paths[i].edges[k-1]].getOutflowAt(theta, j))
+                j += 1
+            newEvents.extend(self._f[e].extendInflow(nextTheta-theta, rates))
+
+        self._upToAt[v] = nextTheta
+        return newEvents
+
+
+    def toFlow(self) -> Flow:
+        f = {}
+        for e in self._network.edges:
+            edgeFlowP = [PWConst([zero],[],zero) for _ in range(self._noOfCommodities)]
+            j = 0
+            for (i,_) in self._edgeContainedIn[e]:
+                edgeFlowP[i] += self._f[e].getFplus(j)
+            f[e] = EdgeFlow(e, self._noOfCommodities, edgeFlowP)
+
+        commodities = []
+        for i in range(self._noOfCommodities):
+            commodities.append(Commodity(self._sources[i], self._sinks[i], self._u[i]))
+
+        return Flow(self._network, commodities, f)
 
 
 # A partial feasible flow with in-/outflow rates for every edges and commodity and queues for every edge
