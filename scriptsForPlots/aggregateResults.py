@@ -307,7 +307,8 @@ if True:
         print('tmean', [round(float(i),4) for i in tmean])
 
 ##################################
-MIN. TRAVEL TIMES PER COMMODITY
+# MIN. TRAVEL TIMES PER COMMODITY
+##################################
 if False:
     figTC, axsTC = plt.subplots(1)
     for c,p in enumerate(f[()].fPlus):
