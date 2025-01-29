@@ -186,7 +186,10 @@ def networkLoading(pathBasedFlows : PartialFlowPathBased, timeHorizon: number=in
 
                     # Determine outflow from edge e
                     if flowTo[e] > 0:
-                        outflowRate = partialPathFlows[i].fPlus[j].getValueAt(theta) / flowTo[e] * min(flowTo[e], e.nu)
+                        if flow.queues[e].getValueAt(theta) > numPrecision:
+                            outflowRate = partialPathFlows[i].fPlus[j].getValueAt(theta) / flowTo[e] * e.nu
+                        else:
+                            outflowRate = partialPathFlows[i].fPlus[j].getValueAt(theta) / flowTo[e] * min(flowTo[e], e.nu)
                     else:
                         outflowRate = 0
                     # Extend fMinus of edge e
